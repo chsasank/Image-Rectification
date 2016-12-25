@@ -50,7 +50,7 @@ vp2 = reestimate_model(vp2, edgelets2, threshold_reestimate=5)
 vis_model(image, vp2) # Visualize the vanishing point model
 ```
 
-![Vertical Vanishing Point](/results/horizontal_vp.png)
+![Vertical Vanishing Point](/results/vertical_vp.png)
 
 Finally, compute homography and warp the image so that we have a fronto parellel view with orthogonal axes: 
 
