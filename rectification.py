@@ -236,7 +236,7 @@ def remove_inliers(model, edgelets, threshold_inlier=10):
     return edgelets
 
 
-def compute_homography_and_warp(image, vp1, vp2):
+def compute_homography_and_warp(image, vp1, vp2, clip=True, clip_factor=3):
     """Compute homography from vanishing points and warp the image.
 
     It is assumed that vp1 and vp2 correspond to horizontal and vertical
@@ -244,7 +244,8 @@ def compute_homography_and_warp(image, vp1, vp2):
     Firstly, projective transform is computed to make the vanishing points go
     to infinty so that we have a fronto parellel view. Then,Computes affine
     transfom  to make axes corresponding to vanishing points orthogonal.
-    Finally, Image is translated so that most of the image is not missed.
+    Finally, Image is translated so that the image is not missed. Note that
+    this image can be very large. `clip` is provided to deal with this.
 
     Parameters
     ----------
@@ -254,7 +255,11 @@ def compute_homography_and_warp(image, vp1, vp2):
         First vanishing point in homogenous coordinate system.
     vp2: ndarray of shape (3, )
         Second vanishing point in homogenous coordinate system.
-
+    clip: bool, optional
+        If True, image is clipped to clip_factor.
+    clip_factor: float, optional
+        Proportion of image in multiples of image size to be retained if gone
+        out of bounds after homography.
     Returns
     -------
     warped_img: ndarray
@@ -310,11 +315,12 @@ def compute_homography_and_warp(image, vp1, vp2):
     max_y = cords[1].max() - ty
 
     # These might be too large. Clip them.
-    tx = max(tx, -image.shape[1] * 2)
-    ty = max(ty, -image.shape[0] * 2)
+    max_offset = max(image.shape) * clip_factor / 2
+    tx = max(tx, -max_offset)
+    ty = max(ty, -max_offset)
 
-    max_x = min(max_x, -tx + image.shape[1] * 2)
-    max_y = min(max_y, -ty + image.shape[0] * 2)
+    max_x = min(max_x, -tx + max_offset)
+    max_y = min(max_y, -ty + max_offset)
 
     max_x = int(max_x)
     max_y = int(max_y)
@@ -330,14 +336,16 @@ def compute_homography_and_warp(image, vp1, vp2):
     return warped_img
 
 
-def rectify_image(image):
+def rectify_image(image, clip_factor=6):
     """Rectified image with vanishing point computed using ransac.
 
     Parameters
     ----------
     image: ndarray
         Image which has to be rectified.
-
+    clip_factor: float, optional
+        Proportion of image in multiples of image size to be retained if gone
+        out of bounds after homography.
     Returns
     -------
     warped_img: ndarray
@@ -361,7 +369,8 @@ def rectify_image(image):
     vp2 = reestimate_model(vp2, edgelets2, 5)
 
     # Compute the homography and warp
-    warped_img = compute_homography_and_warp(image, vp1, vp2)
+    warped_img = compute_homography_and_warp(image, vp1, vp2,
+                                             clip_factor=clip_factor)
 
     return warped_img
 
@@ -400,3 +409,13 @@ def vis_model(image, model):
         xax = [locations[i, 0], vp[0]]
         yax = [locations[i, 1], vp[1]]
         plt.plot(xax, yax, 'b-.')
+
+    plt.show()
+
+if __name__ == '__main__':
+    import sys
+    image_name = sys.argv[-1]
+    image = io.imread(image_name)
+    print("Rectifying {}".format(image_name))
+    save_name = '.'.join(image_name.split('.')[:-1]) + '_warped.png'
+    io.imsave(save_name, rectify_image(image_name, 4))
