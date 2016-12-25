@@ -1,4 +1,11 @@
-"""Automated Rectification of Image."""
+"""Automated Rectification of Image.
+
+Reference
+---------
+Chaudhury, Krishnendu, Stephen DiVerdi, and Sergey Ioffe. "Auto-rectification
+of user photos." 2014 IEEE International Conference on Image Processing (ICIP).
+ IEEE, 2014.
+"""
 from skimage import feature, color, transform, io
 import numpy as np
 
