@@ -20,11 +20,11 @@ After rectification:
 
 ## How it works
 
-First, compute list of 'edgelets'. An edgelet is a tuple of edge location, edge direction and edge strength. A visualization of edgelets (red) is shown below:
+First, compute list of 'edgelets'. An edgelet is a tuple of edge location, edge direction and edge strength. 
 
 ```python
 edgelets1 = compute_edgelets(image)
-vis_edgelets(image, edgelets1)
+vis_edgelets(image, edgelets1) # Visualize the edgelets
 ```
 
 ![Edgelets](/results/edgelets.png)
