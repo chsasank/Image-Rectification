@@ -4,11 +4,31 @@ import numpy as np
 
 
 def compute_edgelets(image, sigma=3):
-    """Create edgelets as in the paper."""
+    """Create edgelets as in the paper.
+
+    Uses canny edge detection and then finds (small) lines using probabilstic
+    hough transform as edgelets.
+
+    Parameters
+    ----------
+    image: ndarray
+        Image for which edgelets are to be computed.
+    sigma: float
+        Smoothing to be used for canny edge detection.
+
+    Returns
+    -------
+    locations: ndarray of shape (n_edgelets, 2)
+        Locations of each of the edgelets.
+    directions: ndarray of shape (n_edgelets, 2)
+        Direction of the edge (tangent) at each of the edgelet.
+    strengths: ndarray of shape (n_edgelets,)
+        Length of the line segments detected for the edgelet.
+    """
     gray_img = color.rgb2gray(image)
     edges = feature.canny(gray_img, sigma)
-    lines = transform.probabilistic_hough_line(
-        edges, line_length=3, line_gap=2)
+    lines = transform.probabilistic_hough_line(edges, line_length=3,
+                                               line_gap=2)
 
     locations = []
     directions = []
@@ -32,7 +52,18 @@ def compute_edgelets(image, sigma=3):
 
 
 def edgelet_lines(edgelets):
-    """Compute edgelet lines as described in paper."""
+    """Compute lines in homogenous system for edglets.
+
+    Parameters
+    ----------
+    edgelets: tuple of ndarrays
+        (locations, directions, strengths) as computed by `compute_edgelets`.
+
+    Returns
+    -------
+    lines: ndarray of shape (n_edgelets, 3)
+        Lines at each of edgelet locations in homogenous system.
+    """
     locations, directions, _ = edgelets
     normals = np.zeros_like(directions)
     normals[:, 0] = directions[:, 1]
@@ -43,9 +74,27 @@ def edgelet_lines(edgelets):
 
 
 def compute_votes(edgelets, model, threshold_inlier=5):
-    """Compute votes for each of the edgelet against model.
+    """Compute votes for each of the edgelet against a given vanishing point.
 
-    threshold_inlier is in degrees.
+    Votes for edgelets which lie inside threshold are same as their strengths,
+    otherwise zero.
+
+    Parameters
+    ----------
+    edgelets: tuple of ndarrays
+        (locations, directions, strengths) as computed by `compute_edgelets`.
+    model: ndarray of shape (3,)
+        Vanishing point model in homogenous cordinate system.
+    threshold_inlier: float
+        Threshold to be used for computing inliers in degrees. Angle between
+        edgelet direction and line connecting the  Vanishing point model and
+        edgelet location is used to threshold.
+
+    Returns
+    -------
+    votes: ndarry of shape (n_edgelets,)
+        Votes towards vanishing point model for each of the edgelet.
+
     """
     vp = model[:2] / model[2]
 
@@ -65,7 +114,22 @@ def compute_votes(edgelets, model, threshold_inlier=5):
 
 
 def ransac_vanishing_point(edgelets, num_ransac_iter=2000, threshold_inlier=5):
-    """Estimate vanishing point using Ransac."""
+    """Estimate vanishing point using Ransac.
+
+    Parameters
+    ----------
+    edgelets: tuple of ndarrays
+        (locations, directions, strengths) as computed by `compute_edgelets`.
+    num_ransac_iter: int
+        Number of iterations to run ransac.
+    threshold_inlier: float
+        threshold to be used for computing inliers in degrees.
+
+    Returns
+    -------
+    best_model: ndarry of shape (3,)
+        Best model for vanishing point estimated.
+    """
     locations, directions, strengths = edgelets
     lines = edgelet_lines(edgelets)
 
@@ -103,8 +167,26 @@ def ransac_vanishing_point(edgelets, num_ransac_iter=2000, threshold_inlier=5):
     return best_model
 
 
-def reestimate_model(model, edgelets, threshold_reestimate=10):
-    """Reestimate vanishing point using inliers and least squares."""
+def reestimate_model(model, edgelets, threshold_reestimate=5):
+    """Reestimate vanishing point using inliers and least squares.
+
+    All the edgelets which are within a threshold are used to reestimate model
+
+    Parameters
+    ----------
+    model: ndarry of shape (3,)
+        Vanishing point model in homogenous coordinates which is to be
+        reestimated.
+    edgelets: tuple of ndarrays
+        (locations, directions, strengths) as computed by `compute_edgelets`.
+    threshold_inlier: float
+        threshold to be used for finding inlier edgelets.
+
+    Returns
+    -------
+    restimated_model: ndarry of shape (3,)
+        Reestimated model for vanishing point in homogenous coordinates.
+    """
     locations, directions, strengths = edgelets
 
     inliers = compute_votes(edgelets, model, threshold_reestimate) > 0
@@ -120,8 +202,24 @@ def reestimate_model(model, edgelets, threshold_reestimate=10):
     return np.concatenate((est_model, [1.]))
 
 
-def remove_inliers(edgelets, model, threshold_inlier=10):
-    """Remove inliers."""
+def remove_inliers(model, edgelets, threshold_inlier=10):
+    """Remove all inlier edglets of a given model.
+
+    Parameters
+    ----------
+    model: ndarry of shape (3,)
+        Vanishing point model in homogenous coordinates which is to be
+        reestimated.
+    edgelets: tuple of ndarrays
+        (locations, directions, strengths) as computed by `compute_edgelets`.
+    threshold_inlier: float
+        threshold to be used for finding inlier edgelets.
+
+    Returns
+    -------
+    edgelets_new: tuple of ndarrays
+        All Edgelets except those which are inliers to model.
+    """
     inliers = compute_votes(edgelets, model, 10) > 0
     locations, directions, strengths = edgelets
     locations = locations[~inliers]
@@ -132,13 +230,36 @@ def remove_inliers(edgelets, model, threshold_inlier=10):
 
 
 def compute_homography_and_warp(image, vp1, vp2):
-    """Compute homography with rotations and shear components."""
+    """Compute homography from vanishing points and warp the image.
+
+    It is assumed that vp1 and vp2 correspond to horizontal and vertical
+    directions, although the order is not assumed.
+    Firstly, projective transform is computed to make the vanishing points go
+    to infinty so that we have a fronto parellel view. Then,Computes affine
+    transfom  to make axes corresponding to vanishing points orthogonal.
+    Finally, Image is translated so that most of the image is not missed.
+
+    Parameters
+    ----------
+    image: ndarray
+        Image which has to be wrapped.
+    vp1: ndarray of shape (3, )
+        First vanishing point in homogenous coordinate system.
+    vp2: ndarray of shape (3, )
+        Second vanishing point in homogenous coordinate system.
+
+    Returns
+    -------
+    warped_img: ndarray
+        Image warped using homography as described above.
+    """
     # Find Projective Transform
     vanishing_line = np.cross(vp1, vp2)
     H = np.eye(3)
     H[2] = vanishing_line / vanishing_line[2]
     H = H / H[2, 2]
 
+    # Find directions corresponding to vanishing points
     v_post1 = np.dot(H, vp1)
     v_post2 = np.dot(H, vp2)
     v_post1 = v_post1 / np.sqrt(v_post1[0]**2 + v_post1[1]**2)
@@ -149,7 +270,7 @@ def compute_homography_and_warp(image, vp1, vp2):
 
     thetas = np.arctan2(directions[0], directions[1])
 
-    # Find angle closest to horizontal axis (0)
+    # Find direction closest to horizontal axis
     h_ind = np.argmin(np.abs(thetas))
 
     # Find positve angle among the rest for the vertical axis
@@ -161,7 +282,7 @@ def compute_homography_and_warp(image, vp1, vp2):
     A1 = np.array([[directions[0, v_ind], directions[0, h_ind], 0],
                    [directions[1, v_ind], directions[1, h_ind], 0],
                    [0, 0, 1]])
-    # Might be a reflection. If so remove reflection.
+    # Might be a reflection. If so, remove reflection.
     if np.linalg.det(A1) < 0:
         A1[:, 0] = -A1[:, 0]
 
@@ -203,27 +324,42 @@ def compute_homography_and_warp(image, vp1, vp2):
 
 
 def rectify_image(image):
-    """Main function."""
+    """Rectified image with vanishing point computed using ransac.
+
+    Parameters
+    ----------
+    image: ndarray
+        Image which has to be rectified.
+
+    Returns
+    -------
+    warped_img: ndarray
+        Rectified image.
+    """
     if type(image) is not np.ndarray:
         image = io.imread(image)
 
-    # Find first vanishing point
+    # Compute all edgelets.
     edgelets1 = compute_edgelets(image)
+
+    # Find first vanishing point
     vp1 = ransac_vanishing_point(edgelets1, 2000, threshold_inlier=5)
-    vp1 = reestimate_model(vp1, edgelets1, 1)
+    vp1 = reestimate_model(vp1, edgelets1, 5)
+
+    # Remove inlier to remove dominating direction.
+    edgelets2 = remove_inliers(vp1, edgelets1, 10)
 
     # Find second vanishing point
-    edgelets2 = remove_inliers(edgelets1, vp1, 10)
     vp2 = ransac_vanishing_point(edgelets2, 2000, threshold_inlier=5)
     vp2 = reestimate_model(vp2, edgelets2, 5)
 
-    # Compute the homography
+    # Compute the homography and warp
     warped_img = compute_homography_and_warp(image, vp1, vp2)
 
     return warped_img
 
 
-def vis_edgelets(image, edgelets):
+def vis_edgelets(image, edgelets, show=True):
     """Helper function to visualize edgelets."""
     import matplotlib.pyplot as plt
     plt.figure(figsize=(10, 10))
@@ -237,17 +373,20 @@ def vis_edgelets(image, edgelets):
 
         plt.plot(xax, yax, 'r-')
 
+    if show:
+        plt.show()
+
 
 def vis_model(image, model):
     """Helper function to visualize computed model."""
     import matplotlib.pyplot as plt
     edgelets = compute_edgelets(image)
     locations, directions, strengths = edgelets
-    inliers = compute_votes(edgelets, model, 2) > 0
+    inliers = compute_votes(edgelets, model, 10) > 0
 
     edgelets = (locations[inliers], directions[inliers], strengths[inliers])
     locations, directions, strengths = edgelets
-    vis_edgelets(edgelets)
+    vis_edgelets(image, edgelets, False)
     vp = model / model[2]
     plt.plot(vp[0], vp[1], 'bo')
     for i in range(locations.shape[0]):
