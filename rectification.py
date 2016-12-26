@@ -314,13 +314,14 @@ def compute_homography_and_warp(image, vp1, vp2, clip=True, clip_factor=3):
     max_x = cords[0].max() - tx
     max_y = cords[1].max() - ty
 
-    # These might be too large. Clip them.
-    max_offset = max(image.shape) * clip_factor / 2
-    tx = max(tx, -max_offset)
-    ty = max(ty, -max_offset)
+    if clip:
+        # These might be too large. Clip them.
+        max_offset = max(image.shape) * clip_factor / 2
+        tx = max(tx, -max_offset)
+        ty = max(ty, -max_offset)
 
-    max_x = min(max_x, -tx + max_offset)
-    max_y = min(max_y, -ty + max_offset)
+        max_x = min(max_x, -tx + max_offset)
+        max_y = min(max_y, -ty + max_offset)
 
     max_x = int(max_x)
     max_y = int(max_y)
