@@ -184,13 +184,17 @@ def ransac_vanishing_point(edgelets, num_ransac_iter=2000, threshold_inlier=5):
     return best_model
 
 
-def ransac_3_line(edgelets, num_ransac_iter=2000, threshold_inlier=5):
+def ransac_3_line(edgelets, focal_length, num_ransac_iter=2000,
+                  threshold_inlier=5):
     """Estimate orthogonal vanishing points using 3 line Ransac algorithm.
 
+    Assumes camera has been calibrated and its focal length is known.
     Parameters
     ----------
     edgelets: tuple of ndarrays
         (locations, directions, strengths) as computed by `compute_edgelets`.
+    focal_length: float
+        Focal length of the camera used.
     num_ransac_iter: int
         Number of iterations to run ransac.
     threshold_inlier: float
@@ -233,7 +237,9 @@ def ransac_3_line(edgelets, num_ransac_iter=2000, threshold_inlier=5):
         l3 = lines[ind3]
 
         vp1 = np.cross(l1, l2)
-        vp2 = np.cross(l3, vp1)
+        # The vanishing line polar to v1
+        h = np.dot(vp1, [1 / focal_length**2, 1 / focal_length**2, 1])
+        vp2 = np.cross(h, l3)
 
         if np.sum(vp1**2) < 1 or vp1[2] == 0:
             # reject degenerate candidates
@@ -244,8 +250,7 @@ def ransac_3_line(edgelets, num_ransac_iter=2000, threshold_inlier=5):
             continue
 
         vp1_votes = compute_votes(edgelets, vp1, threshold_inlier)
-        vp2_votes = compute_votes(remove_inliers(vp1, edgelets),
-                                  vp2, threshold_inlier)
+        vp2_votes = compute_votes(edgelets, vp2, threshold_inlier)
         current_votes = (vp1_votes > 0).sum() + (vp2_votes > 0).sum()
 
         if current_votes > best_votes:
@@ -460,7 +465,8 @@ def vis_model(image, model, show=True):
         plt.show()
 
 
-def rectify_image(image, clip_factor=6, algorithm='3-line'):
+def rectify_image(image, clip_factor=6, algorithm='independent', 
+                  reestimate=False):
     """Rectified image with vanishing point computed using ransac.
 
     Parameters
@@ -471,9 +477,13 @@ def rectify_image(image, clip_factor=6, algorithm='3-line'):
         Proportion of image in multiples of image size to be retained if gone
         out of bounds after homography.
     algorithm: one of {'3-line', 'independent'}
-        3-line algorithm finds the orthogonal vanishing points together.
         independent ransac algorithm finds the orthogonal vanishing points by
         applying ransac twice.
+        3-line algorithm finds the orthogonal vanishing points together, but
+        assumes knowledge of focal length.
+    reestimate: bool
+        If ransac results are to be reestimated using least squares with
+        inlers. Turn this off if getting bad results.
     Returns
     -------
     warped_img: ndarray
@@ -488,16 +498,20 @@ def rectify_image(image, clip_factor=6, algorithm='3-line'):
     if algorithm == 'independent':
         # Find first vanishing point
         vp1 = ransac_vanishing_point(edgelets1, 2000, threshold_inlier=5)
-        vp1 = reestimate_model(vp1, edgelets1, 5)
+        if reestimate:
+            vp1 = reestimate_model(vp1, edgelets1, 5)
 
         # Remove inlier to remove dominating direction.
         edgelets2 = remove_inliers(vp1, edgelets1, 10)
 
         # Find second vanishing point
         vp2 = ransac_vanishing_point(edgelets2, 2000, threshold_inlier=5)
-        vp2 = reestimate_model(vp2, edgelets2, 5)
+        if reestimate:
+            vp2 = reestimate_model(vp2, edgelets2, 5)
     elif algorithm == '3-line':
-        vp1, vp2 = ransac_3_line(edgelets1, 3000, threshold_inlier=5)
+        focal_length = None
+        vp1, vp2 = ransac_3_line(edgelets1, focal_length,
+                                 num_ransac_iter=3000, threshold_inlier=5)
     else:
         raise KeyError(
             "Parameter 'algorithm' has to be one of {'3-line', 'independent'}")
